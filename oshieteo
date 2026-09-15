@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Oshieteo (教えてお) - универсальный умный помощник для терминала
+# ==============================================================================
+
+set -e
+
+# Цвета для вывода
+BOLD="\033[1m"
+GREEN="\033[0;32m"
+BLUE="\033[0;34m"
+YELLOW="\033[0;33m"
+RED="\033[0;31m"
+RESET="\033[0m"
+
+log_info() {
+    echo -e "${BLUE}ℹ️  ${1}${RESET}" >&2
+}
+
+log_warn() {
+    echo -e "${YELLOW}⚠️  ${1}${RESET}" >&2
+}
+
+log_error() {
+    echo -e "${RED}❌ ${1}${RESET}" >&2
+}
+
+# Функция вызова справки исполняемого файла
+show_executable_help() {
+    local cmd="$1"
+    # Если путь относительный и лежит в текущей директории, добавляем ./
+    if [[ -f "$cmd" && "$cmd" != /* && "$cmd" != ./* ]]; then
+        cmd="./$cmd"
+    fi
+
+    log_info "Исполняемый файл ($cmd): запуск проверки справки..."
+    # Пробуем вызвать с --help, если ошибка или пусто — пробуем -h
+    if "$cmd" --help 2>&1; then
+        exit 0
+    elif "$cmd" -h 2>&1; then
+        exit 0
+    elif "$cmd" help 2>&1; then
+        exit 0
+    else
+        log_warn "Не удалось получить справку через --help, -h или help."
+        exit 1
+    fi
+}
+
+# --- 9. Если запущен без аргументов ---
+if [ $# -eq 0 ]; then
+    if command -v fastfetch >/dev/null 2>&1; then
+        exec fastfetch
+    elif command -v neofetch >/dev/null 2>&1; then
+        exec neofetch
+    else
+        log_info "Информация о системе:"
+        uname -a
+        if [ -f /etc/os-release ]; then
+            cat /etc/os-release
+        fi
+    fi
+    exit 0
+fi
+
+TARGET="$1"
+
+# Справка по ключу -h / --help для самой oshieteo
+if [[ "$TARGET" == "-h" || "$TARGET" == "--help" ]]; then
+    cat << 'HELP'
+sono shikumi wo
+HELP
+    exit 0
+fi
+
+# --- 3. Веб-ссылки (http:// или https://) ---
+if [[ "$TARGET" =~ ^https?:// ]]; then
+    CLEAN_URL="${TARGET%%\?*}"
+    CLEAN_URL="${CLEAN_URL%%\#*}"
+
+    if [[ "$CLEAN_URL" =~ \.(zip|tar(\.(gz|bz2|xz|zst))?|tgz|tbz2|txz|rar|7z|iso|bin|exe|deb|rpm|apk|dmg|pkg|img|mp4|mkv|avi|mp3|flac|wav|pdf|docx?|xlsx?|pptx?|epub|png|jpe?g|gif|webp|svg|wasm|jar|aar)$ ]]; then
+        log_info "Скачивание файла: $TARGET"
+        if command -v wget >/dev/null 2>&1; then
+            exec wget "$TARGET"
+        elif command -v curl >/dev/null 2>&1; then
+            exec curl -O -L "$TARGET"
+        else
+            log_error "Ни wget, ни curl не найдены."
+            exit 1
+        fi
+    else
+        log_info "Открытие веб-страницы: $TARGET"
+        if command -v lynx >/dev/null 2>&1; then
+            exec lynx -dump "$TARGET"
+        elif command -v links >/dev/null 2>&1; then
+            exec links -dump "$TARGET"
+        elif command -v curl >/dev/null 2>&1; then
+            exec curl -sL "$TARGET"
+        else
+            log_error "Не найден lynx, links или curl."
+            exit 1
+        fi
+    fi
+fi
+
+# --- 2. Директории ---
+if [ -d "$TARGET" ]; then
+    if command -v eza >/dev/null 2>&1; then
+        exec eza -la --icons "$TARGET"
+    else
+        exec ls -la --color=auto "$TARGET"
+    fi
+fi
+
+# --- Если аргумент — существующий файл ---
+if [ -f "$TARGET" ]; then
+    LOWER_TARGET="$(echo "$TARGET" | tr '[:upper:]' '[:lower:]')"
+
+    # 4. Любые архивы (Авто-распаковщик)
+    if [[ "$LOWER_TARGET" =~ \.(tar\.gz|tgz)$ ]]; then
+        log_info "Распаковка tar.gz: $TARGET"
+        exec tar -xvf "$TARGET"
+    elif [[ "$LOWER_TARGET" =~ \.(tar\.bz2|tbz2)$ ]]; then
+        log_info "Распаковка tar.bz2: $TARGET"
+        exec tar -xvf "$TARGET"
+    elif [[ "$LOWER_TARGET" =~ \.(tar\.xz|txz)$ ]]; then
+        log_info "Распаковка tar.xz: $TARGET"
+        exec tar -xvf "$TARGET"
+    elif [[ "$LOWER_TARGET" =~ \.tar$ ]]; then
+        log_info "Распаковка tar: $TARGET"
+        exec tar -xvf "$TARGET"
+    elif [[ "$LOWER_TARGET" =~ \.zip$ ]]; then
+        log_info "Распаковка zip: $TARGET"
+        if command -v unzip >/dev/null 2>&1; then
+            exec unzip "$TARGET"
+        elif command -v bsdtar >/dev/null 2>&1; then
+            exec bsdtar -xvf "$TARGET"
+        elif command -v 7z >/dev/null 2>&1; then
+            exec 7z x "$TARGET"
+        else
+            log_error "Не найден unzip (или bsdtar / 7z)."
+            exit 1
+        fi
+    elif [[ "$LOWER_TARGET" =~ \.rar$ ]]; then
+        log_info "Распаковка rar: $TARGET"
+        if command -v unrar >/dev/null 2>&1; then
+            exec unrar x "$TARGET"
+        elif command -v bsdtar >/dev/null 2>&1; then
+            exec bsdtar -xvf "$TARGET"
+        elif command -v 7z >/dev/null 2>&1; then
+            exec 7z x "$TARGET"
+        else
+            log_error "Не найден unrar."
+            exit 1
+        fi
+    elif [[ "$LOWER_TARGET" =~ \.7z$ ]]; then
+        log_info "Распаковка 7z: $TARGET"
+        if command -v 7z >/dev/null 2>&1; then
+            exec 7z x "$TARGET"
+        elif command -v 7za >/dev/null 2>&1; then
+            exec 7za x "$TARGET"
+        else
+            log_error "Не найден 7z или 7za."
+            exit 1
+        fi
+    fi
+
+    # 5. Изображения (Рендер в консоли)
+    if [[ "$LOWER_TARGET" =~ \.(png|jpe?g|gif|webp|bmp|svg)$ ]]; then
+        if command -v chafa >/dev/null 2>&1; then
+            exec chafa "$TARGET"
+        elif command -v catimg >/dev/null 2>&1; then
+            exec catimg "$TARGET"
+        else
+            log_warn "Утилиты chafa или catimg не найдены."
+            file "$TARGET"
+            exit 0
+        fi
+    fi
+
+    # 8. Форматы данных (JSON/Markdown)
+    if [[ "$LOWER_TARGET" =~ \.json$ ]]; then
+        if command -v jq >/dev/null 2>&1; then
+            exec jq . "$TARGET"
+        elif command -v python3 >/dev/null 2>&1; then
+            exec python3 -m json.tool "$TARGET"
+        elif command -v bat >/dev/null 2>&1; then
+            exec bat "$TARGET"
+        else
+            exec cat "$TARGET"
+        fi
+    fi
+
+    if [[ "$LOWER_TARGET" =~ \.(md|markdown)$ ]]; then
+        if command -v glow >/dev/null 2>&1; then
+            exec glow "$TARGET"
+        elif command -v bat >/dev/null 2>&1; then
+            exec bat "$TARGET"
+        else
+            exec cat "$TARGET"
+        fi
+    fi
+
+    # Исполняемый файл (бинарник или скрипт с правами +x) -> проверка help
+    if [ -x "$TARGET" ]; then
+        show_executable_help "$TARGET"
+    fi
+
+    # 1. Текстовые файлы и код
+    if command -v bat >/dev/null 2>&1; then
+        exec bat "$TARGET"
+    else
+        exec cat "$TARGET"
+    fi
+fi
+
+# --- 6. Сетевые хосты и IP-адреса ---
+# IP-адрес (IPv4 или IPv6)
+if [[ "$TARGET" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || [[ "$TARGET" =~ ^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$ ]]; then
+    log_info "Пинг хоста $TARGET..."
+    exec ping -c 4 "$TARGET"
+fi
+
+# Доменное имя
+if [[ "$TARGET" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
+    log_info "Запрос информации о домене $TARGET..."
+    if command -v whois >/dev/null 2>&1; then
+        exec whois "$TARGET"
+    elif command -v dig >/dev/null 2>&1; then
+        exec dig "$TARGET" +noall +answer +comments
+    else
+        exec ping -c 4 "$TARGET"
+    fi
+fi
+
+# --- 7. Системные службы (Systemd) ---
+if command -v systemctl >/dev/null 2>&1; then
+    SVC=""
+    if systemctl cat "$TARGET" >/dev/null 2>&1; then
+        SVC="$TARGET"
+    elif systemctl cat "${TARGET}.service" >/dev/null 2>&1; then
+        SVC="${TARGET}.service"
+    elif [[ "$TARGET" == "ssh" ]] && systemctl cat sshd >/dev/null 2>&1; then
+        SVC="sshd"
+    fi
+
+    if [ -n "$SVC" ]; then
+        exec systemctl status "$SVC"
+    fi
+fi
+
+# Если передан исполняемый файл или утилита из PATH
+if command -v "$TARGET" >/dev/null 2>&1; then
+    show_executable_help "$TARGET"
+fi
+
+# Если не подошел ни один вариант
+log_error "Не удалось определить тип объекта: '$TARGET'"
+log_info "Убедитесь, что файл существует, служба systemd доступна, либо передан валидный домен / IP / URL."
+exit 1
